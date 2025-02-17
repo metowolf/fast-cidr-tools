@@ -38,3 +38,10 @@ export function clz64(bigint: bigint) {
   }
   return r;
 }
+
+const int128_0 = new BigInt64Array(2);
+export function fast_popcnt128(value: bigint) {
+  int128_0[0] = value & 0xFFFFFFFFFFFFFFFFn;
+  int128_0[1] = value >> 64n;
+  return fast_popcnt64(int128_0[0]) + fast_popcnt64(int128_0[1]);
+}

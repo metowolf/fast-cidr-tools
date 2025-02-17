@@ -1,73 +1,36 @@
 import type { IpMeta } from '../parse';
-import { clz64 } from './util';
 
 export function subparts($start: bigint, $end: bigint, version: 4 | 6): IpMeta[] {
-  const size: bigint = $end + 1n - $start; /* diff($end, $start); */
-
-  // special case for when size is power of 2 and start is on the boundary
-  if ((size & (size - 1n)) === 0n && $start % size === 0n) {
-    return [[$start, $end, version]];
+  const parts: IpMeta[] = [];
+  
+  // Calculate host bits
+  let hostBits = 0n;
+  let tmp = $start ^ $end;
+  while (tmp !== 0n) {
+    tmp = tmp >> 1n;
+    hostBits++;
   }
 
-  let power = 0n;
-  let biggest: bigint = size === 0n
-    ? 0n
-    : (
-      power = BigInt(64 - clz64(size) - 1),
-      2n ** (power === -1n ? 128n : power)
-    );
+  // Calculate netmask and address range
+  const hostMask = (1n << hostBits) - 1n;
+  const networkAddr = $start & ~hostMask;
+  const broadcastAddr = $start | hostMask;
 
-  let start: bigint, end: bigint;
-  if ($start % biggest === 0n) {
-    // start is matching on the size-defined boundary - ex: 0-12, use 0-8
-    start = $start;
-    end = start + biggest - 1n;
-  } else {
-    start = ($end / biggest) * biggest;
+  if (hostBits > 1n) {
+    const splitLow = networkAddr | (hostMask >> 1n);
+    const splitHigh = broadcastAddr & ~(hostMask >> 1n);
 
-    // start is not matching on the size-defined boundary - 4-16, use 8-16
-    if ((start + biggest - 1n) > $end) {
-      // bigint when divide will floor to nearest integer
-      start = (($end / biggest) - 1n) * biggest;
-
-      while (start < $start) {
-        biggest /= 2n;
-        start = (($end / biggest) - 1n) * biggest;
-      }
-
-      end = start + biggest - 1n;
+    if ($start !== networkAddr || $end !== broadcastAddr) {
+      // Recursively process left and right subnets
+      const leftParts = subparts($start, splitLow, version);
+      const rightParts = subparts(splitHigh, $end, version);
+      
+      parts.push(...leftParts, ...rightParts);
     } else {
-      start = ($end / biggest) * biggest;
-      end = start + biggest - 1n;
+      parts.push([networkAddr, broadcastAddr, version]);
     }
-  }
-
-  const parts: IpMeta[] = [[start, end, version]];
-
-  let subparted: IpMeta[] = [];
-
-  let cached_parts_length = 0;
-
-  // additional subnets on left side
-  if (start !== $start) {
-    subparted = subparts($start, start - 1n, version);
-    cached_parts_length = parts.length;
-    parts.length = cached_parts_length + subparted.length;
-
-    for (let i = 0, len = subparted.length; i < len; i++) {
-      parts[cached_parts_length + i] = subparted[i];
-    }
-  }
-
-  // additional subnets on right side
-  if (end !== $end) {
-    subparted = subparts(end + 1n, $end, version);
-    cached_parts_length = parts.length;
-    parts.length = cached_parts_length + subparted.length;
-
-    for (let i = 0, len = subparted.length; i < len; i++) {
-      parts[cached_parts_length + i] = subparted[i];
-    }
+  } else {
+    parts.push([$start, $end, version]);
   }
 
   return parts;
